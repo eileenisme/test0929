@@ -55,7 +55,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="card">
         <h1>👋 Hello, World!</h1>
-        <p>這是一個使用 Python Flask 建立的一頁式網站。製作者:Eileen</p>
+        <p>這是一個使用 Python Flask 建立的一頁式網站。製作者:Eileen小海豹</p>
         <span class="badge">Powered by Flask</span>
     </div>
 </body>
