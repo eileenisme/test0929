@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}商品維護{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1">商品維護</h3>
+        <p class="text-muted small mb-0">管理商品資料表 (product)，包含定價與庫存維護（修改單價不會影響已成立的歷史訂單）</p>
+    </div>
+    <button class="btn btn-primary btn-gradient shadow-sm" data-bs-toggle="modal" data-bs-target="#newProductModal">
+        <i class="bi bi-plus-square me-1"></i> 新增商品
+    </button>
+</div>
+
+<div class="card card-custom overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-4">商品編號</th>
+                    <th>商品名稱</th>
+                    <th>商品分類</th>
+                    <th>目前售價</th>
+                    <th>庫存量</th>
+                    <th class="text-end pe-4">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in products %}
+                <tr>
+                    <td class="ps-4"><code>{{ p.product_id }}</code></td>
+                    <td class="fw-bold">{{ p.name }}</td>
+                    <td><span class="badge bg-light text-dark border">{{ p.category }}</span></td>
+                    <td class="text-primary fw-bold">NT$ {{ "{:,}".format(p.unit_price) }}</td>
+                    <td>
+                        <span class="badge {% if p.stock > 10 %}bg-success-subtle text-success{% else %}bg-warning-subtle text-warning{% endif %}">
+                            {{ p.stock }} 件
+                        </span>
+                    </td>
+                    <td class="text-end pe-4">
+                        <button class="btn btn-outline-primary btn-sm me-1" 
+                                data-bs-toggle="modal" 
+                                data-bs-target="#editProductModal"
+                                data-id="{{ p.product_id }}"
+                                data-name="{{ p.name }}"
+                                data-price="{{ p.unit_price }}"
+                                data-stock="{{ p.stock }}"
+                                data-category="{{ p.category }}"
+                                onclick="fillProductEditModal(this)">
+                            <i class="bi bi-pencil me-1"></i>編輯
+                        </button>
+                        <form method="POST" action="{{ url_for('product_delete', product_id=p.product_id) }}" class="d-inline" onsubmit="return confirm('確定要刪除商品 {{ p.name }} 嗎？');">
+                            <button type="submit" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 新增商品 Modal -->
+<div class="modal fade" id="newProductModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('product_new') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">新增商品</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品編號</label>
+                        <input type="text" name="product_id" class="form-control" placeholder="例如: P106" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品名稱</label>
+                        <input type="text" name="name" class="form-control" placeholder="例如: 阿里山高山茶" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col">
+                            <label class="form-label fw-semibold">單價 (CHECK >= 0)</label>
+                            <input type="number" name="unit_price" class="form-control" min="0" placeholder="0" required>
+                        </div>
+                        <div class="col">
+                            <label class="form-label fw-semibold">庫存 (CHECK >= 0)</label>
+                            <input type="number" name="stock" class="form-control" min="0" placeholder="0" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品分類</label>
+                        <input type="text" name="category" class="form-control" placeholder="例如: 茶葉飲品 / 伴手禮盒" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-gradient">儲存商品</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 編輯商品 Modal -->
+<div class="modal fade" id="editProductModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('product_edit_post') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">編輯商品資料</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="product_id" id="edit_product_id">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品編號</label>
+                        <input type="text" id="display_product_id" class="form-control" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品名稱</label>
+                        <input type="text" name="name" id="edit_product_name" class="form-control" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col">
+                            <label class="form-label fw-semibold">單價 (CHECK >= 0)</label>
+                            <input type="number" name="unit_price" id="edit_unit_price" class="form-control" min="0" required>
+                        </div>
+                        <div class="col">
+                            <label class="form-label fw-semibold">庫存 (CHECK >= 0)</label>
+                            <input type="number" name="stock" id="edit_stock" class="form-control" min="0" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">商品分類</label>
+                        <input type="text" name="category" id="edit_category" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary btn-gradient">更新商品</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fillProductEditModal(btn) {
+    document.getElementById('edit_product_id').value = btn.getAttribute('data-id');
+    document.getElementById('display_product_id').value = btn.getAttribute('data-id');
+    document.getElementById('edit_product_name').value = btn.getAttribute('data-name');
+    document.getElementById('edit_unit_price').value = btn.getAttribute('data-price');
+    document.getElementById('edit_stock').value = btn.getAttribute('data-stock');
+    document.getElementById('edit_category').value = btn.getAttribute('data-category');
+}
+</script>
+{% endblock %}

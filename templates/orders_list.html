@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}訂單管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h3 class="fw-bold mb-1">訂單管理</h3>
+        <p class="text-muted small mb-0">瀏覽所有訂單、即時切換狀態或檢視出貨單 QRCode</p>
+    </div>
+    <a href="{{ url_for('new_order') }}" class="btn btn-primary btn-gradient shadow-sm">
+        <i class="bi bi-plus-lg me-1"></i> 新增訂單
+    </a>
+</div>
+
+<!-- 快速篩選標籤 -->
+<div class="card card-custom p-3 mb-4">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span class="text-muted small fw-bold me-2"><i class="bi bi-funnel me-1"></i>狀態篩選:</span>
+        <a href="{{ url_for('orders_list') }}" class="btn btn-sm {% if not current_status %}btn-dark{% else %}btn-outline-secondary{% endif %}">全部 ({{ orders|length }})</a>
+        <a href="{{ url_for('orders_list', status='處理中') }}" class="btn btn-sm {% if current_status == '處理中' %}btn-warning text-dark fw-bold{% else %}btn-outline-warning text-dark{% endif %}">處理中</a>
+        <a href="{{ url_for('orders_list', status='已出貨') }}" class="btn btn-sm {% if current_status == '已出貨' %}btn-primary{% else %}btn-outline-primary{% endif %}">已出貨</a>
+        <a href="{{ url_for('orders_list', status='已完成') }}" class="btn btn-sm {% if current_status == '已完成' %}btn-success{% else %}btn-outline-success{% endif %}">已完成</a>
+        <a href="{{ url_for('orders_list', status='已取消') }}" class="btn btn-sm {% if current_status == '已取消' %}btn-danger{% else %}btn-outline-danger{% endif %}">已取消</a>
+    </div>
+</div>
+
+<div class="card card-custom overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-4">訂單編號</th>
+                    <th>客戶姓名</th>
+                    <th>訂購日期</th>
+                    <th>業務人員</th>
+                    <th>品項數 / 總金額</th>
+                    <th style="min-width: 170px;">訂單狀態 (即時更新)</th>
+                    <th class="text-end pe-4">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if orders %}
+                    {% for order in orders %}
+                    <tr>
+                        <td class="ps-4">
+                            <a href="{{ url_for('order_detail', order_id=order.order_id) }}" class="fw-bold text-decoration-none">
+                                {{ order.order_id }}
+                            </a>
+                        </td>
+                        <td>
+                            <div class="fw-semibold">{{ order.customer_name }}</div>
+                            <small class="text-muted">{{ order.customer_id }}</small>
+                        </td>
+                        <td>{{ order.order_date }}</td>
+                        <td><span class="badge bg-light text-secondary border">{{ order.sales_person }}</span></td>
+                        <td>
+                            <span class="badge bg-secondary rounded-pill me-1">{{ order.item_count }} 項</span>
+                            <span class="fw-bold text-primary">NT$ {{ "{:,}".format(order.total_amount or 0) }}</span>
+                        </td>
+                        <td>
+                            <!-- 直接切換狀態表單 -->
+                            <form method="POST" action="{{ url_for('update_order_status', order_id=order.order_id) }}" class="d-inline">
+                                <select name="status" class="form-select form-select-sm d-inline-block w-auto" onchange="this.form.submit()">
+                                    <option value="處理中" {% if order.status == '處理中' %}selected{% endif %}>🟡 處理中</option>
+                                    <option value="已出貨" {% if order.status == '已出貨' %}selected{% endif %}>🔵 已出貨</option>
+                                    <option value="已完成" {% if order.status == '已完成' %}selected{% endif %}>🟢 已完成</option>
+                                    <option value="已取消" {% if order.status == '已取消' %}selected{% endif %}>🔴 已取消</option>
+                                </select>
+                            </form>
+                        </td>
+                        <td class="text-end pe-4">
+                            <a href="{{ url_for('order_detail', order_id=order.order_id) }}" class="btn btn-outline-primary btn-sm me-1" title="查看出貨單與 QRCode">
+                                <i class="bi bi-qr-code-scan me-1"></i>詳情/QRCode
+                            </a>
+                            <form method="POST" action="{{ url_for('delete_order', order_id=order.order_id) }}" class="d-inline" onsubmit="return confirm('確定要刪除訂單 {{ order.order_id }} 嗎？');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm" title="刪除訂單">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            目前無訂單資料
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
