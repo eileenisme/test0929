@@ -157,3 +157,50 @@ def test_price_immutability(client):
     # 再次檢查歷史訂單 SO20261001，單價應依然為 450
     resp2 = client.get('/order/SO20261001')
     assert "450" in resp2.data.decode('utf-8')
+
+def test_admin_dashboard(client):
+    """測試營運儀表板 /admin 頁面與指標計算 (排除已取消訂單)"""
+    # 1. 未登入訪問應轉跳登入
+    unauth_resp = client.get('/admin')
+    assert unauth_resp.status_code == 302
+    assert '/login' in unauth_resp.headers['Location']
+
+    # 2. 管理員登入後訪問
+    with client.session_transaction() as sess:
+        sess['logged_in'] = True
+        sess['role'] = 'admin'
+        sess['username'] = 'admin'
+
+    resp = client.get('/admin')
+    assert resp.status_code == 200
+    html = resp.data.decode('utf-8')
+
+    # 驗證關鍵標題與 KPI 卡片
+    assert "營運儀表板" in html
+    assert "累計營收" in html
+    assert "有效訂單數" in html
+    assert "平均客單價" in html
+    assert "總客戶數" in html
+
+    # 驗證排除已取消訂單之計算
+    # 初始測試資料中：
+    # SO20261001: 450*2 + 680*1 + 520*3 = 900 + 680 + 1560 = 3140 (已出貨)
+    # SO20261002: 180*5 + 260*2 = 900 + 520 = 1420 (已完成)
+    # SO20261003: 450*1 = 450 (處理中)
+    # SO20261004: 520*2 = 1040 (已出貨)
+    # SO20261005: 260*4 = 1040 (已取消 -> 不計入)
+    # 有效營收 = 3140 + 1420 + 450 + 1040 = 6050
+    # 有效訂單數 = 4
+    # 平均客單價 = 6050 / 4 = 1512.5 -> 1512 或 1513
+    assert "6,050" in html
+    assert "1,512" in html or "1,513" in html
+
+    # 驗證 Chart.js 與圖表 Canvas
+    assert "monthlyRevenueChart" in html
+    assert "orderStatusChart" in html
+    assert "chart.umd.min.js" in html
+
+    # 驗證 Top 5 排行榜
+    assert "熱銷商品 Top 5" in html
+    assert "客戶消費排行 Top 5" in html
+    assert "陳建宏" in html

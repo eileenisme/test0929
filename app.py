@@ -22,6 +22,15 @@ if not os.path.exists(DB_FILE):
     except Exception as e:
         print(f"初始化資料庫失敗: {e}")
 
+@app.template_filter("comma")
+def comma_filter(val):
+    try:
+        if val is None or val == "":
+            return "0"
+        return f"{int(round(float(val))):,}"
+    except (ValueError, TypeError):
+        return str(val)
+
 # 管理員帳號與 Werkzeug 雜湊密碼（程式碼與畫面皆不得出現明碼）
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 # 預設為 admin123 雜湊值 (scrypt)
@@ -81,8 +90,103 @@ def logout():
 @app.route("/")
 def index():
     if session.get("logged_in") and session.get("role") == "admin":
-        return redirect(url_for("orders_list"))
+        return redirect(url_for("admin_dashboard"))
     return redirect(url_for("login"))
+
+# ==================== 營運儀表板 (Dashboard) ====================
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    conn = get_db_connection()
+
+    # 1. KPI 卡片計算 (排除狀態為「已取消」的訂單)
+    kpi_query = """
+        SELECT 
+            COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS total_revenue,
+            COUNT(DISTINCT o.order_id) AS valid_order_count,
+            (SELECT COUNT(*) FROM customer) AS total_customers
+        FROM orders o
+        JOIN order_item oi ON o.order_id = oi.order_id
+        WHERE o.status != '已取消'
+    """
+    kpi_row = conn.execute(kpi_query).fetchone()
+    
+    total_revenue = kpi_row["total_revenue"] if kpi_row else 0
+    valid_order_count = kpi_row["valid_order_count"] if kpi_row else 0
+    total_customers = kpi_row["total_customers"] if kpi_row else 0
+    avg_order_value = round(total_revenue / valid_order_count) if valid_order_count > 0 else 0
+
+    # 2. 每月營收趨勢 (折線圖，排除已取消訂單，依月份由近到遠或時間軸排序)
+    monthly_query = """
+        SELECT strftime('%Y-%m', o.order_date) AS month,
+               COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS revenue
+        FROM orders o
+        JOIN order_item oi ON o.order_id = oi.order_id
+        WHERE o.status != '已取消'
+        GROUP BY month
+        ORDER BY month ASC
+    """
+    monthly_rows = conn.execute(monthly_query).fetchall()
+    monthly_labels = [row["month"] for row in monthly_rows]
+    monthly_revenues = [row["revenue"] for row in monthly_rows]
+
+    # 3. 訂單狀態分布 (環圈圖，包含所有狀態以完整呈現訂單生命週期狀態)
+    status_query = """
+        SELECT status, COUNT(*) AS count
+        FROM orders
+        GROUP BY status
+        ORDER BY count DESC
+    """
+    status_rows = conn.execute(status_query).fetchall()
+    # 預設狀態清單與顏色配置
+    status_labels = [row["status"] for row in status_rows]
+    status_counts = [row["count"] for row in status_rows]
+
+    # 4. 熱銷商品 Top 5 (排除已取消訂單：商品名稱、售出數量、營收)
+    top_products_query = """
+        SELECT p.product_id, p.name AS product_name, p.category,
+               COALESCE(SUM(oi.quantity), 0) AS total_quantity,
+               COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS total_revenue
+        FROM order_item oi
+        JOIN orders o ON oi.order_id = o.order_id
+        JOIN product p ON oi.product_id = p.product_id
+        WHERE o.status != '已取消'
+        GROUP BY p.product_id, p.name
+        ORDER BY total_revenue DESC, total_quantity DESC
+        LIMIT 5
+    """
+    top_products = conn.execute(top_products_query).fetchall()
+
+    # 5. 客戶消費排行 Top 5 (排除已取消訂單：客戶名稱、訂單數、消費金額)
+    top_customers_query = """
+        SELECT c.customer_id, c.name AS customer_name, c.phone,
+               COUNT(DISTINCT o.order_id) AS order_count,
+               COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS total_spent
+        FROM orders o
+        JOIN customer c ON o.customer_id = c.customer_id
+        JOIN order_item oi ON o.order_id = oi.order_id
+        WHERE o.status != '已取消'
+        GROUP BY c.customer_id, c.name
+        ORDER BY total_spent DESC, order_count DESC
+        LIMIT 5
+    """
+    top_customers = conn.execute(top_customers_query).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "admin_dashboard.html",
+        total_revenue=total_revenue,
+        valid_order_count=valid_order_count,
+        avg_order_value=avg_order_value,
+        total_customers=total_customers,
+        monthly_labels=monthly_labels,
+        monthly_revenues=monthly_revenues,
+        status_labels=status_labels,
+        status_counts=status_counts,
+        top_products=top_products,
+        top_customers=top_customers
+    )
 
 # ==================== 訂單管理 (Orders) ====================
 # 需求 8: 訂單狀態（處理中 / 已出貨 / 已完成 / 已取消），可在列表直接更新

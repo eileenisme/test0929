@@ -116,6 +116,11 @@
                 <div class="position-sticky">
                     <ul class="nav flex-column">
                         <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}" href="{{ url_for('admin_dashboard') }}">
+                                <i class="bi bi-speedometer2"></i>營運儀表板
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link {% if request.endpoint in ['orders_list', 'order_detail', 'new_order'] %}active{% endif %}" href="{{ url_for('orders_list') }}">
                                 <i class="bi bi-receipt"></i>訂單管理
                             </a>
