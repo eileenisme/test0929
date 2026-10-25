@@ -23,14 +23,14 @@
                 </h5>
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <label class="form-label fw-semibold">訂單編號</label>
-                        <input type="text" name="order_id" class="form-control" value="{{ default_order_id }}" required>
-                        <small class="text-muted">自動產生，亦可自訂</small>
+                        <label class="form-label fw-semibold">訂單編號 <span class="text-danger">*</span></label>
+                        <input type="text" name="order_id" id="order_id" class="form-control" value="{{ default_order_id }}" pattern="^SO\d+$" title="訂單編號格式必須為 SO 後接數字（例如：SO20261025001）" required>
+                        <small class="text-muted">格式規範：<code>SO+數字</code>（如 SO20261025001）</small>
                     </div>
 
                     <div class="col-md-4">
-                        <label class="form-label fw-semibold">選擇客戶 <span class="text-danger">*</span></label>
-                        <select name="customer_id" class="form-select" required>
+                        <label class="form-label fw-semibold">選擇客戶 (下拉選單) <span class="text-danger">*</span></label>
+                        <select name="customer_id" id="customer_id" class="form-select" required>
                             <option value="">-- 請選擇客戶 --</option>
                             {% for c in customers %}
                                 <option value="{{ c.customer_id }}">{{ c.customer_id }} - {{ c.name }} ({{ c.phone }})</option>
@@ -40,7 +40,7 @@
 
                     <div class="col-md-4">
                         <label class="form-label fw-semibold">業務人員 <span class="text-danger">*</span></label>
-                        <input type="text" name="sales_person" class="form-control" value="{{ session.get('username') or '管理員' }}" required>
+                        <input type="text" name="sales_person" class="form-control" value="{{ session.get('username') or 'admin' }}" required>
                     </div>
 
                     <div class="col-md-6">
@@ -60,11 +60,11 @@
                 </div>
             </div>
 
-            <!-- 商品選購明細區塊 (一次勾選多項並填數量) -->
+            <!-- 商品選購明細區塊 (商品下拉選單 + 數量) -->
             <div class="card card-custom p-4 mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
                     <h5 class="fw-bold mb-0 text-primary">
-                        <i class="bi bi-cart-check me-1"></i> 勾選購買商品與數量
+                        <i class="bi bi-cart-check me-1"></i> 購買商品選單與明細
                     </h5>
                     <span class="badge bg-primary bg-opacity-10 text-primary fs-6 px-3 py-2" id="totalPreview">
                         預估總金額：NT$ 0
@@ -72,46 +72,53 @@
                 </div>
 
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle">
+                    <table class="table table-hover align-middle" id="itemsTable">
                         <thead class="table-light">
                             <tr>
-                                <th style="width: 50px;">選取</th>
-                                <th>商品編號</th>
-                                <th>商品名稱</th>
-                                <th>分類</th>
-                                <th>當前單價</th>
-                                <th>現有庫存</th>
-                                <th style="width: 150px;">購買數量</th>
-                                <th style="width: 120px;" class="text-end">小計</th>
+                                <th style="min-width: 250px;">選擇商品 (下拉選單) <span class="text-danger">*</span></th>
+                                <th style="width: 140px;">單價</th>
+                                <th style="width: 110px;">庫存</th>
+                                <th style="width: 160px;">購買數量 (正整數) <span class="text-danger">*</span></th>
+                                <th style="width: 130px;" class="text-end">小計</th>
+                                <th style="width: 70px;" class="text-center">操作</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {% for p in products %}
-                            <tr class="product-row" data-price="{{ p.unit_price }}">
+                        <tbody id="itemsBody">
+                            <tr class="item-row">
                                 <td>
-                                    <input class="form-check-input item-check" type="checkbox" name="product_ids" value="{{ p.product_id }}" id="chk_{{ p.product_id }}" onchange="calculateTotal()">
-                                </td>
-                                <td><code>{{ p.product_id }}</code></td>
-                                <td>
-                                    <label class="form-check-label fw-semibold" for="chk_{{ p.product_id }}">
-                                        {{ p.name }}
-                                    </label>
-                                </td>
-                                <td><span class="badge bg-light text-dark border">{{ p.category }}</span></td>
-                                <td class="text-primary fw-bold">NT$ {{ "{:,}".format(p.unit_price) }}</td>
-                                <td>
-                                    <span class="badge {% if p.stock > 10 %}bg-success-subtle text-success{% else %}bg-warning-subtle text-warning{% endif %}">
-                                        {{ p.stock }}
-                                    </span>
+                                    <select name="product_id[]" class="form-select product-select" required onchange="handleProductChange(this)">
+                                        <option value="">-- 請選擇商品 --</option>
+                                        {% for p in products %}
+                                            <option value="{{ p.product_id }}" data-price="{{ p.unit_price }}" data-stock="{{ p.stock }}">
+                                                {{ p.product_id }} - {{ p.name }} ({{ p.category }})
+                                            </option>
+                                        {% endfor %}
+                                    </select>
                                 </td>
                                 <td>
-                                    <input type="number" name="qty_{{ p.product_id }}" class="form-control form-control-sm item-qty" value="1" min="1" oninput="calculateTotal()">
+                                    <span class="price-display text-muted">NT$ 0</span>
+                                </td>
+                                <td>
+                                    <span class="stock-display text-muted">-</span>
+                                </td>
+                                <td>
+                                    <input type="number" name="quantity[]" class="form-control item-qty" value="1" min="1" step="1" required oninput="validateAndRecalculate(this)">
                                 </td>
                                 <td class="text-end fw-bold row-subtotal">NT$ 0</td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeItemRow(this)" title="移除此品項">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
                             </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
+                </div>
+
+                <div class="mt-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addItemRow()">
+                        <i class="bi bi-plus-circle me-1"></i> 新增商品品項 (下拉選單)
+                    </button>
                 </div>
             </div>
 
@@ -129,34 +136,151 @@
 
 {% block scripts %}
 <script>
+// 商品選項範本
+const productOptionsHTML = `
+    <option value="">-- 請選擇商品 --</option>
+    {% for p in products %}
+        <option value="{{ p.product_id }}" data-price="{{ p.unit_price }}" data-stock="{{ p.stock }}">
+            {{ p.product_id }} - {{ p.name }} ({{ p.category }})
+        </option>
+    {% endfor %}
+`;
+
+function handleProductChange(selectEl) {
+    const row = selectEl.closest('tr');
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    const price = parseFloat(selectedOption.getAttribute('data-price')) || 0;
+    const stock = selectedOption.getAttribute('data-stock');
+
+    const priceDisplay = row.querySelector('.price-display');
+    const stockDisplay = row.querySelector('.stock-display');
+
+    if (selectEl.value) {
+        priceDisplay.textContent = 'NT$ ' + price.toLocaleString();
+        priceDisplay.className = 'price-display text-primary fw-semibold';
+        stockDisplay.innerHTML = '<span class="badge bg-secondary-subtle text-secondary">' + stock + ' 件</span>';
+    } else {
+        priceDisplay.textContent = 'NT$ 0';
+        priceDisplay.className = 'price-display text-muted';
+        stockDisplay.textContent = '-';
+    }
+    calculateTotal();
+}
+
+function validateAndRecalculate(inputEl) {
+    // 確保輸入為正整數
+    let val = parseInt(inputEl.value, 10);
+    if (isNaN(val) || val < 1) {
+        inputEl.setCustomValidity('數量必須為正整數 (>= 1)');
+    } else {
+        inputEl.setCustomValidity('');
+    }
+    calculateTotal();
+}
+
 function calculateTotal() {
-    let total = 0;
-    const rows = document.querySelectorAll('.product-row');
+    let grandTotal = 0;
+    const rows = document.querySelectorAll('#itemsBody tr.item-row');
     rows.forEach(row => {
-        const checkbox = row.querySelector('.item-check');
+        const select = row.querySelector('.product-select');
         const qtyInput = row.querySelector('.item-qty');
-        const price = parseFloat(row.getAttribute('data-price')) || 0;
         const subtotalEl = row.querySelector('.row-subtotal');
-        
-        if (checkbox.checked) {
-            const qty = Math.max(1, parseInt(qtyInput.value) || 1);
+
+        const selectedOption = select.options[select.selectedIndex];
+        const price = parseFloat(selectedOption ? selectedOption.getAttribute('data-price') : 0) || 0;
+        const qty = parseInt(qtyInput.value, 10) || 0;
+
+        if (select.value && qty > 0) {
             const subtotal = price * qty;
             subtotalEl.textContent = 'NT$ ' + subtotal.toLocaleString();
-            total += subtotal;
-            row.classList.add('table-primary');
+            grandTotal += subtotal;
         } else {
             subtotalEl.textContent = 'NT$ 0';
-            row.classList.remove('table-primary');
         }
     });
-    document.getElementById('totalPreview').textContent = '預估總金額：NT$ ' + total.toLocaleString();
+    document.getElementById('totalPreview').textContent = '預估總金額：NT$ ' + grandTotal.toLocaleString();
+}
+
+function addItemRow() {
+    const tbody = document.getElementById('itemsBody');
+    const tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML = `
+        <td>
+            <select name="product_id[]" class="form-select product-select" required onchange="handleProductChange(this)">
+                ${productOptionsHTML}
+            </select>
+        </td>
+        <td><span class="price-display text-muted">NT$ 0</span></td>
+        <td><span class="stock-display text-muted">-</span></td>
+        <td>
+            <input type="number" name="quantity[]" class="form-control item-qty" value="1" min="1" step="1" required oninput="validateAndRecalculate(this)">
+        </td>
+        <td class="text-end fw-bold row-subtotal">NT$ 0</td>
+        <td class="text-center">
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeItemRow(this)" title="移除此品項">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    `;
+    tbody.appendChild(tr);
+}
+
+function removeItemRow(btn) {
+    const rows = document.querySelectorAll('#itemsBody tr.item-row');
+    if (rows.length <= 1) {
+        alert('訂單至少需要包含一項商品！');
+        return;
+    }
+    btn.closest('tr').remove();
+    calculateTotal();
 }
 
 document.getElementById('orderForm').addEventListener('submit', function(e) {
-    const checked = document.querySelectorAll('.item-check:checked');
-    if (checked.length === 0) {
+    const orderIdInput = document.getElementById('order_id');
+    const orderIdVal = orderIdInput.value.trim();
+    if (!/^SO\d+$/.test(orderIdVal)) {
         e.preventDefault();
-        alert('請至少勾選一項商品！');
+        alert('訂單編號格式不符合！必須以 "SO" 開頭且後面全為數字，例如：SO20261025001');
+        orderIdInput.focus();
+        return;
+    }
+
+    const rows = document.querySelectorAll('#itemsBody tr.item-row');
+    if (rows.length === 0) {
+        e.preventDefault();
+        alert('請至少加入一項商品！');
+        return;
+    }
+
+    const selectedProducts = [];
+    for (let row of rows) {
+        const select = row.querySelector('.product-select');
+        const qtyInput = row.querySelector('.item-qty');
+        const pid = select.value.trim();
+        const qty = parseInt(qtyInput.value, 10);
+
+        if (!pid) {
+            e.preventDefault();
+            alert('請為所有品項選擇商品！');
+            select.focus();
+            return;
+        }
+
+        if (isNaN(qty) || qty <= 0 || !Number.isInteger(Number(qtyInput.value))) {
+            e.preventDefault();
+            alert('所有商品數量都必須是正整數（大於 0）！');
+            qtyInput.focus();
+            return;
+        }
+
+        if (selectedProducts.includes(pid)) {
+            e.preventDefault();
+            alert('訂單內有重複選取的商品編號：' + pid + '，請合併數量或選擇不同商品！');
+            select.focus();
+            return;
+        }
+        selectedProducts.push(pid);
     }
 });
 </script>

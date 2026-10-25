@@ -29,10 +29,10 @@ def check_database():
     print_separator("1. customer 客戶資料表")
     cursor.execute("SELECT * FROM customer;")
     rows = cursor.fetchall()
-    print(f"{'客戶編號':<8} | {'客戶姓名':<8} | {'連絡電話':<15} | {'建檔日期':<12} | {'地址'}")
+    print(f"{'客戶編號':<8} | {'客戶姓名':<8} | {'連絡電話':<15} | {'地址'}")
     print("-" * 80)
     for r in rows:
-        print(f"{r['customer_id']:<8} | {r['name']:<8} | {r['phone']:<15} | {r['created_date']:<12} | {r['address']}")
+        print(f"{r['customer_id']:<8} | {r['name']:<8} | {r['phone']:<15} | {r['address']}")
 
     # 2. 查詢 product
     print_separator("2. product 商品資料表")

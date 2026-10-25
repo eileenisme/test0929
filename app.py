@@ -1,10 +1,12 @@
 import os
 import io
+import re
 import base64
 import sqlite3
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
+from werkzeug.security import generate_password_hash, check_password_hash
 import qrcode
 
 app = Flask(__name__)
@@ -20,9 +22,13 @@ if not os.path.exists(DB_FILE):
     except Exception as e:
         print(f"初始化資料庫失敗: {e}")
 
-# 管理員帳密（驗收條件 10）
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123"
+# 管理員帳號與 Werkzeug 雜湊密碼（程式碼與畫面皆不得出現明碼）
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+# 預設為 admin123 雜湊值 (scrypt)
+ADMIN_PASSWORD_HASH = os.environ.get(
+    "ADMIN_PASSWORD_HASH",
+    "scrypt:32768:8:1$CpOhQfDwMhSznhNk$231db8a8a6a1691d6fd8d5eafef9df9a0720e7369b0b7f62fe6a832f6222cae7031bf29f64592d615bc82d51dd5c518658c475db18a4a949a80fd416442df71c"
+)
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
@@ -30,29 +36,34 @@ def get_db_connection():
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
-# 登入保護裝飾器 (需求 5: 管理員登入後可維護客戶、商品、訂單)
-def login_required(f):
+# 後台權限保護裝飾器 (需求 2: 後台所有頁面需登入(session)且角色為管理員才能進入)
+def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not session.get("logged_in"):
-            flash("請先登入管理員帳號！", "warning")
+        if not session.get("logged_in") or session.get("role") != "admin":
+            flash("此頁面僅限管理員存取，請先以管理員身分登入！", "warning")
             return redirect(url_for("login", next=request.url))
         return f(*args, **kwargs)
     return decorated_function
 
+# 保留相容別名
+login_required = admin_required
+
 # ==================== 認證功能 (Auth) ====================
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if session.get("logged_in"):
+    if session.get("logged_in") and session.get("role") == "admin":
         return redirect(url_for("orders_list"))
 
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
 
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        # 使用 werkzeug check_password_hash 進行安全密碼雜湊比對
+        if username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD_HASH, password):
             session["logged_in"] = True
             session["username"] = username
+            session["role"] = "admin"
             flash("管理員登入成功！歡迎使用訂單管理系統。", "success")
             next_url = request.args.get("next")
             return redirect(next_url or url_for("orders_list"))
@@ -69,14 +80,14 @@ def logout():
 
 @app.route("/")
 def index():
-    if session.get("logged_in"):
+    if session.get("logged_in") and session.get("role") == "admin":
         return redirect(url_for("orders_list"))
     return redirect(url_for("login"))
 
 # ==================== 訂單管理 (Orders) ====================
 # 需求 8: 訂單狀態（處理中 / 已出貨 / 已完成 / 已取消），可在列表直接更新
 @app.route("/orders")
-@login_required
+@admin_required
 def orders_list():
     status_filter = request.args.get("status")
     conn = get_db_connection()
@@ -101,9 +112,9 @@ def orders_list():
     conn.close()
     return render_template("orders_list.html", orders=orders, current_status=status_filter)
 
-# 需求 6 & 7: 新增訂單（客戶下拉選單、商品勾選與數量、存下單當下價格）
+# 需求 4, 5, 6, 7: 新增訂單（客戶/商品下拉選單、SO+數字格式驗證、數量正整數校驗）
 @app.route("/orders/new", methods=["GET", "POST"])
-@login_required
+@admin_required
 def new_order():
     conn = get_db_connection()
     if request.method == "POST":
@@ -112,17 +123,69 @@ def new_order():
         order_date = request.form.get("order_date", "").strip()
         sales_person = request.form.get("sales_person", "").strip()
         status = request.form.get("status", "處理中").strip()
-        product_ids = request.form.getlist("product_ids")
 
+        # 支援商品下拉選單 product_id[] 與數量 quantity[]，並相容舊格式 product_ids
+        raw_product_ids = request.form.getlist("product_id[]")
+        raw_quantities = request.form.getlist("quantity[]")
+
+        items_to_add = []
+        if raw_product_ids:
+            for i, pid in enumerate(raw_product_ids):
+                pid = pid.strip()
+                if not pid:
+                    continue
+                qty_str = raw_quantities[i].strip() if i < len(raw_quantities) else "1"
+                items_to_add.append((pid, qty_str))
+        else:
+            legacy_product_ids = request.form.getlist("product_ids")
+            for pid in legacy_product_ids:
+                pid = pid.strip()
+                if not pid:
+                    continue
+                qty_str = request.form.get(f"qty_{pid}", "1").strip()
+                items_to_add.append((pid, qty_str))
+
+        # 基本欄位驗證
         if not order_id or not customer_id or not sales_person or not order_date:
             flash("請填寫所有必填欄位！", "danger")
             conn.close()
             return redirect(url_for("new_order"))
 
-        if not product_ids:
-            flash("請至少勾選一項訂購商品！", "danger")
+        # 4. 訂單編號加上 SO+數字 的格式驗證 (例如 SO20261025001)
+        if not re.match(r"^SO\d+$", order_id):
+            flash("訂單編號格式不正確！必須為 'SO' 開頭且後接數字（例如：SO20261025001）。", "danger")
             conn.close()
             return redirect(url_for("new_order"))
+
+        if not items_to_add:
+            flash("請至少選擇一項商品！", "danger")
+            conn.close()
+            return redirect(url_for("new_order"))
+
+        # 驗證不能有重複商品
+        pids_seen = set()
+        for pid, _ in items_to_add:
+            if pid in pids_seen:
+                flash(f"訂單內有重複的商品編號 {pid}，請合併數量！", "danger")
+                conn.close()
+                return redirect(url_for("new_order"))
+            pids_seen.add(pid)
+
+        # 5. 後端數量正整數驗證（正整數: > 0 的整數，不能為小數、0 或負數）
+        validated_items = []
+        for pid, qty_str in items_to_add:
+            try:
+                # 嚴格整數解析：若包含小數點或非整數字元則拒絕
+                if not qty_str.isdigit() or int(qty_str) <= 0:
+                    flash(f"商品 {pid} 的數量「{qty_str}」必須是正整數（大於 0 的整數）！", "danger")
+                    conn.close()
+                    return redirect(url_for("new_order"))
+                qty = int(qty_str)
+            except (ValueError, TypeError):
+                flash(f"商品 {pid} 的數量必須為有效的正整數！", "danger")
+                conn.close()
+                return redirect(url_for("new_order"))
+            validated_items.append((pid, qty))
 
         try:
             # 檢查訂單編號是否重複
@@ -132,22 +195,14 @@ def new_order():
                 conn.close()
                 return redirect(url_for("new_order"))
 
-            # 插入訂單主檔
+            # 插入訂單主檔 (參數化查詢 ?)
             conn.execute("""
                 INSERT INTO orders (order_id, customer_id, order_date, status, sales_person)
                 VALUES (?, ?, ?, ?, ?)
             """, (order_id, customer_id, order_date, status, sales_person))
 
-            # 查詢勾選商品目前的單價，寫入 order_item (需求 7: 保存下單當時單價)
-            for pid in product_ids:
-                qty_str = request.form.get(f"qty_{pid}", "1").strip()
-                try:
-                    qty = int(qty_str)
-                    if qty <= 0:
-                        qty = 1
-                except ValueError:
-                    qty = 1
-
+            # 查詢勾選商品目前的單價，寫入 order_item (需求 7: 保存下單當時單價，參數化查詢 ?)
+            for pid, qty in validated_items:
                 product = conn.execute("SELECT unit_price FROM product WHERE product_id = ?", (pid,)).fetchone()
                 if product:
                     current_price = product["unit_price"]
@@ -171,7 +226,7 @@ def new_order():
     conn.close()
 
     today = datetime.now().strftime("%Y-%m-%d")
-    default_order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    default_order_id = f"SO{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     return render_template("new_order.html", 
                            customers=customers, 
